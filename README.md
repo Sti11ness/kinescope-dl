@@ -47,6 +47,20 @@ OUTPUT_FILE — path to the output mp4 file
 ```shell
 kinescope-dl -r https://example.com --best-quality https://kinescope.io/123456789 ./my_videos/video.mp4
 ```
+## ✨ What's new in this fork
+
+This fork of kinescope-dl introduces several functional and usability improvements:
+
+- ✅ **HLS resolution selection** – now you can choose video quality even for HLS streams (previously skipped automatically).  
+- ✅ **Audio track handling** – proper merging of video and audio tracks, no more silent videos.  
+- ✅ **Progress bar** – downloading now shows a clear progress bar with time estimation instead of just elapsed seconds.  
+- ✅ **Fallback logic** – if HLS fails, the script automatically falls back to DASH (and vice versa).  
+- ✅ **Output validation** – downloaded files are verified with `ffprobe` (if available) to avoid broken or empty videos.  
+- ✅ **`--hls-only` / `--dash-only` flags** – you can force a specific download mode.  
+- ✅ **Preferred audio language** – `--audio-lang` option lets you select audio track language (e.g. `ru`, `en`).  
+- ✅ **Result folder** – all downloaded videos are saved into a `./result` directory by default (to avoid cluttering the working folder).  
+
+These changes make the tool more robust and user-friendly, while keeping full compatibility with the original project.
 
 ## 🔨 Build from sources
 ### Requirements
