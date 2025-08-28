@@ -39,13 +39,15 @@ OUTPUT_FILE — path to the output mp4 file
       -r, --referer URL      Referer url of the site where the video is embedded
       --best-quality         Automatically select the best possible quality
       --temp PATH            Path to directory for temporary files
-      --ffmpeg-path PATH     Path to the ffmpeg executable
-      --mp4decrypt-path PATH Path to the mp4decrypt executable
+      --hls-only             Force HLS mode, skip DASH
+      --dash-only            Force DASH mode, skip HLS
+      --audio-lang CODE      Preferred audio language (e.g. ru, en)
+      --force                Overwrite output file if it already exists
       --help                 Show this message and exit
 
 ### Example
 ```shell
-kinescope-dl -r https://example.com --best-quality https://kinescope.io/123456789 ./my_videos/video.mp4
+kinescope-dl -r https://example.com --best-quality --hls-only https://kinescope.io/123456789 ./result/video.mp4
 ```
 ## ✨ What's new in this fork
 
