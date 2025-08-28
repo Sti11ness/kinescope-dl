@@ -90,7 +90,7 @@ class VideoDownloader:
         s = Session()
         s.headers.update({
             'Accept-Encoding': 'identity',
-            'User-Agent': 'kinescope-dl/0.2 (+https://github.com/your/fork)'
+            'User-Agent': 'kinescope-dl/0.3 (+https://github.com/your/fork)'
         })
         retry = Retry(
             total=5, connect=5, read=5, backoff_factor=0.5,
