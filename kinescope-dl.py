@@ -1,81 +1,138 @@
 import click
 from urllib.parse import urlparse
-
+import m3u8
 from kinescope import KinescopeVideo, KinescopeDownloader
-
+from pathlib import Path
 
 class URLType(click.ParamType):
     name = 'url'
 
     def convert(self, value, param, ctx):
         try:
-            parsed_url = urlparse(value)
-            if parsed_url.scheme and parsed_url.netloc:
+            parsed = urlparse(value)
+            if parsed.scheme and parsed.netloc:
                 return value
-            else:
-                self.fail(f'Expected valid url. Got {value}', param, ctx)
-        except Exception as E:
-            self.fail(f'Expected valid url. Got {value}: {E}', param, ctx)
+            self.fail(f'Expected valid url. Got {value}', param, ctx)
+        except Exception as e:
+            self.fail(f'Expected valid url. Got {value}: {e}', param, ctx)
 
 
 @click.command()
+@click.argument('url', type=URLType())
+@click.argument('output')
+
+@click.option(
+    '--outdir',
+    default='./results',
+    help='Directory where final videos will be saved'
+)
+@click.option('--hls-only', is_flag=True, default=False, help='Force HLS mode, skip DASH')
+@click.option('--dash-only', is_flag=True, default=False, help='Force DASH mode, skip HLS')
+@click.option('--audio-lang', default=None, help='Preferred audio language code, e.g. ru or en')
+@click.option('--force', is_flag=True, default=False, help='Overwrite output if exists')
+
 @click.option(
     '--referer', '-r',
-    required=False, help='Referer url of the site where the video is embedded', type=URLType()
+    required=False,
+    help='Referer url of the site where the video is embedded',
+    type=URLType()
 )
 @click.option(
     '--best-quality',
-    default=False, required=False, help='Automatically select the best possible quality', is_flag=True
+    default=False,
+    is_flag=True,
+    help='Automatically select the best possible quality'
 )
 @click.option(
     '--temp',
-    default='./temp', required=False, help='Path to directory for temporary files', type=click.Path()
+    default='./temp',
+    help='Temporary directory for intermediate files'
 )
-@click.argument('input_url', type=URLType())
-@click.argument('output_file', type=click.Path())
-@click.option("--ffmpeg-path", default='./ffmpeg', required=False, help='Path to ffmpeg executable', type=click.Path())
-@click.option("--mp4decrypt-path", default='./mp4decrypt', required=False, help='Path to mp4decrypt executable', type=click.Path())
-def main(referer,
-         best_quality,
-         temp, 
-         input_url,
-         output_file,
-         ffmpeg_path,
-         mp4decrypt_path):
-    """
-    Kinescope-dl: Video downloader for Kinescope
 
-    \b
-    <INPUT_URL> is url of the Kinescope video
-    <OUTPUT_FILE> is path to the output mp4 file
-    """
+def main(url, output, referer, best_quality, temp, hls_only, dash_only, audio_lang, force, outdir):
+    outdir_path = Path(outdir)
+    outdir_path.mkdir(parents=True, exist_ok=True)
 
-    kinescope_video: KinescopeVideo = KinescopeVideo(
-        url=input_url,
-        referer_url=referer
-    )
+    out_path = outdir_path / Path(output).with_suffix('.mp4')
+    if out_path.exists() and not force:
+        raise click.UsageError(f'Output exists: {out_path}')
 
-    downloader: KinescopeDownloader = KinescopeDownloader(kinescope_video, temp, ffmpeg_path=ffmpeg_path, mp4decrypt_path=mp4decrypt_path)
+    kv = KinescopeVideo(url=url, referer_url=referer)
+    downloader = KinescopeDownloader(kv, temp_dir=temp)
+    downloader.preferred_audio_lang = audio_lang
+
+    if hls_only:
+        downloader.playlist_url = downloader.kinescope_video.get_hls_master_playlist_url()
+        downloader.playlist_type = 'hls'
+        downloader.mpd_master = None
+    elif dash_only:
+        downloader.playlist_url = downloader.kinescope_video.get_mpd_master_playlist_url()
+        downloader.playlist_type = 'dash'
+        downloader.mpd_master = downloader._fetch_mpd_master()
+
+    if getattr(downloader, 'playlist_type', None) == 'hls':
+        print('= OPTIONS ============================')
+        variants = downloader.get_hls_variants()  # [(res,(w,h)|None), bw, video_uri, audio_uri]
+        if variants:
+            # Подсчёт длительности и примерного размера для каждого variant-плейлиста
+            computed = []
+            for res, bw, v_uri, a_uri in variants:
+                try:
+                    r = downloader.http.get(v_uri, headers={"Referer": downloader._cdn_referer}, timeout = downloader._req_timeout)
+                    r.raise_for_status()
+                    sub_pl = m3u8.loads(r.text)
+                    total_dur = sum(s.duration for s in sub_pl.segments)
+                    size_mb = round((bw / 8 * total_dur) / (1024 * 1024), 1)
+                except Exception:
+                    total_dur = None
+                    size_mb = None
+                computed.append((res, bw, v_uri, a_uri, total_dur, size_mb))
+
+            for i, (res, bw, v_uri, a_uri, total_dur, size_mb) in enumerate(computed):
+                label = f"{res[0]}x{res[1]}" if res else "unknown"
+                if size_mb is not None:
+                    print(f'[{i}] {label} ({bw//1000} kbps, ~{size_mb} MB)')
+                else:
+                    print(f'[{i}] {label} ({bw//1000} kbps)')
+
+            if best_quality:
+                res, bw, v_uri, a_uri, total_dur, size_mb = computed[-1]
+                label = f"{res[0]}x{res[1]}" if res else "unknown"
+                if size_mb is not None:
+                    print(f"[*] Auto-selected: {label} ({bw//1000} kbps, ~{size_mb} MB)")
+                else:
+                    print(f"[*] Auto-selected: {label} ({bw//1000} kbps)")
+                chosen_res = res
+            else:
+                idx = int(input('Choose HLS variant index: '))
+                res, bw, v_uri, a_uri, total_dur, size_mb = computed[idx]
+                chosen_res = res
+
+            print('======================================')
+            downloader.download(str(out_path), resolution=chosen_res if chosen_res else None)
+        else:
+            print('[*] HLS master without variants; using master as-is')
+            print('======================================')
+            downloader.download(str(out_path))
+        return
+
+    video_resolutions = downloader.get_resolutions()
+    if not video_resolutions:
+        raise RuntimeError('No resolutions available (DASH)')
 
     print('= OPTIONS ============================')
-    video_resolutions = downloader.get_resolutions()
-    chosen_resolution = video_resolutions[-1] if best_quality else video_resolutions[int(input(
-        '   '.join([f'{i + 1}) {r[1]}p' for i, r in enumerate(video_resolutions)]) +
-        '\n> Quality: '
-    )) - 1]
+    for i, (w, h) in enumerate(video_resolutions):
+        print(f'[{i}] {w}x{h}')
+    if best_quality:
+        chosen_resolution = video_resolutions[-1]
+    else:
+        idx = int(input('Choose resolution index: '))
+        chosen_resolution = video_resolutions[idx]
     print(f'[*] {chosen_resolution[1]}p is selected')
     print('======================================')
 
-    print('\n= DOWNLOADING =================')
-    downloader.download(
-        output_file if output_file else f'{kinescope_video.video_id}.mp4',
-        chosen_resolution
-    )
-    print('===============================')
+    downloader.download(str(out_path), resolution=chosen_res)
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except KeyboardInterrupt:
-        print('[*] Interrupted')
+    main()

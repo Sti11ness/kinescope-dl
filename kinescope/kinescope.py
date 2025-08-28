@@ -15,7 +15,6 @@ class KinescopeVideo:
         self.url = url
         self.video_id = video_id
         self.referer_url = referer_url
-
         self.http = Session()
 
         if not self.video_id:
@@ -24,19 +23,19 @@ class KinescopeVideo:
     def _get_video_id(self):
         r = self.http.get(
             url=self.url,
-            headers={'Referer': self.referer_url}
+            headers={'Referer': self.referer_url or KINESCOPE_BASE_URL}
         )
-
         if r.status_code == 404:
             raise VideoNotFound('Video not found')
-
         if 'id: "' not in r.text:
             raise AccessDenied('Access to the video is denied. Wrong referer_url is specified?')
-
         return r.text.split('id: "')[1].split('"')[0]
 
     def get_mpd_master_playlist_url(self) -> str:
-        return KINESCOPE_MASTER_PLAYLIST_URL.format(video_id=self.video_id)
+        return KINESCOPE_DASH_MASTER_URL.format(video_id=self.video_id)
+
+    def get_hls_master_playlist_url(self) -> str:
+        return KINESCOPE_HLS_MASTER_URL.format(video_id=self.video_id)
 
     def get_clearkey_license_url(self) -> str:
         return KINESCOPE_CLEARKEY_LICENSE_URL.format(video_id=self.video_id)
